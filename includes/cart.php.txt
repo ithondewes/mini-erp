@@ -1,0 +1,173 @@
+<?php
+session_start();
+require_once __DIR__ . '/../config/database.php';
+
+function get_product_by_id($db, $id) {
+    $stmt = $db->prepare("SELECT * FROM products WHERE id = ?");
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+    return $stmt->get_result()->fetch_assoc();
+}
+
+function get_stock_by_id($db, $id) {
+    $stmt = $db->prepare("SELECT * FROM stocks WHERE id = ?");
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+    return $stmt->get_result()->fetch_assoc();
+}
+
+function get_coupon_by_code($db, $code) {
+    $stmt = $db->prepare("SELECT * FROM coupons WHERE code = ? AND active = 1 AND expiry_date >= CURDATE()");
+    $stmt->bind_param("s", $code);
+    $stmt->execute();
+    return $stmt->get_result()->fetch_assoc();
+}
+
+function create_order($db, $data) {
+    $stmt = $db->prepare("INSERT INTO orders (subtotal, freight, cep, address, status) VALUES (?, ?, ?, ?, 'pending')");
+    $stmt->bind_param("ddss", $data['subtotal'], $data['freight'], $data['cep'], $data['address']);
+    $stmt->execute();
+    return $db->insert_id;
+}
+
+function create_order_item($db, $data) {
+    $stmt = $db->prepare("INSERT INTO order_items (order_id, product_id, variation_id, quantity, price) VALUES (?, ?, ?, ?, ?)");
+    $stmt->bind_param("iiidd", $data['order_id'], $data['product_id'], $data['variation_id'], $data['quantity'], $data['price']);
+    return $stmt->execute();
+}
+
+function update_stock_quantity($db, $variation_id, $amount) {
+    $stmt = $db->prepare("UPDATE stocks SET quantity = quantity + ? WHERE id = ?");
+    $stmt->bind_param("ii", $amount, $variation_id);
+    return $stmt->execute();
+}
+
+function calculate_subtotal($cart) {
+    $subtotal = 0;
+    foreach ($cart as $item) {
+        $subtotal += $item['price'] * $item['quantity'];
+    }
+    return $subtotal;
+}
+
+function calculate_freight($subtotal) {
+    if ($subtotal >= 52 && $subtotal <= 166.59) {
+        return 15.00;
+    } elseif ($subtotal > 200) {
+        return 0.00;
+    }
+    return 20.00;
+}
+
+function get_address_from_cep($cep) {
+    $url = "https://viacep.com.br/ws/{$cep}/json/";
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    $response = curl_exec($ch);
+    curl_close($ch);
+    return json_decode($response, true);
+}
+
+function send_order_email($order_id, $address_data) {
+    // Configure SMTP settings (e.g., via Mailtrap) in a real implementation
+    $to = 'customer@example.com';
+    $subject = "Order Confirmation #$order_id";
+    $message = "Order #$order_id Confirmation\n\n";
+    $message .= "Shipping Address:\n";
+    $message .= "{$address_data['logradouro']}, {$address_data['bairro']}\n";
+    $message .= "{$address_data['localidade']} - {$address_data['uf']}, {$address_data['cep']}\n";
+    $headers = "From: no-reply@minierp.com\r\n";
+    mail($to, $subject, $message, $headers); // Use Mailtrap for testing
+}
+
+// Handle cart add
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'add' && isset($_GET['product_id'])) {
+    $product_id = intval($_GET['product_id']);
+    $variation_id = isset($_GET['variation_id']) ? intval($_GET['variation_id']) : null;
+    $product = get_product_by_id($db, $product_id);
+    $stock = $variation_id ? get_stock_by_id($db, $variation_id) : null;
+
+    if ($product && (!$variation_id || ($stock && $stock['quantity'] > 0))) {
+        $cart = isset($_SESSION['cart']) ? $_SESSION['cart'] : [];
+        $key = $product_id . ($variation_id ? '_' . $variation_id : '');
+
+        if (isset($cart[$key])) {
+            $cart[$key]['quantity']++;
+        } else {
+            $cart[$key] = [
+                'product_id' => $product_id,
+                'variation_id' => $variation_id,
+                'name' => $product['name'] . ($variation_id ? ' (' . $stock['variation'] . ')' : ''),
+                'price' => $product['price'],
+                'quantity' => 1
+            ];
+        }
+        $_SESSION['cart'] = $cart;
+    }
+    header("Location: /mini-erp/cart.php");
+    exit;
+}
+
+// Handle coupon application
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'apply_coupon') {
+    $code = $_POST['coupon_code'];
+    $cart = isset($_SESSION['cart']) ? $_SESSION['cart'] : [];
+    $subtotal = calculate_subtotal($cart);
+    $coupon = get_coupon_by_code($db, $code);
+
+    if ($coupon && $subtotal >= $coupon['min_value']) {
+        $_SESSION['coupon'] = $coupon;
+        $_SESSION['success'] = "Coupon applied successfully.";
+    } else {
+        $_SESSION['error'] = "Invalid or expired coupon.";
+    }
+    header("Location: /mini-erp/cart.php");
+    exit;
+}
+
+// Handle checkout
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'checkout') {
+    if (empty($_POST['cep']) || strlen($_POST['cep']) !== 8 || !ctype_digit($_POST['cep'])) {
+        $_SESSION['error'] = "Valid CEP is required.";
+    } else {
+        $cep = $_POST['cep'];
+        $address_data = get_address_from_cep($cep);
+
+        if (isset($address_data['erro'])) {
+            $_SESSION['error'] = "Invalid CEP.";
+        } else {
+            $cart = isset($_SESSION['cart']) ? $_SESSION['cart'] : [];
+            $subtotal = calculate_subtotal($cart);
+            $freight = calculate_freight($subtotal);
+
+            $order_data = [
+                'subtotal' => $subtotal,
+                'freight' => $freight,
+                'cep' => $cep,
+                'address' => json_encode($address_data)
+            ];
+            $order_id = create_order($db, $order_data);
+
+            foreach ($cart as $item) {
+                create_order_item($db, [
+                    'order_id' => $order_id,
+                    'product_id' => $item['product_id'],
+                    'variation_id' => $item['variation_id'],
+                    'quantity' => $item['quantity'],
+                    'price' => $item['price']
+                ]);
+
+                if ($item['variation_id']) {
+                    update_stock_quantity($db, $item['variation_id'], -$item['quantity']);
+                }
+            }
+
+            send_order_email($order_id, $address_data);
+            unset($_SESSION['cart'], $_SESSION['coupon']);
+            $_SESSION['success'] = "Order placed successfully.";
+        }
+    }
+    header("Location: /mini-erp/cart.php");
+    exit;
+}

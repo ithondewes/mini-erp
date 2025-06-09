@@ -1,0 +1,35 @@
+<?php
+require_once __DIR__ . '/../config/database.php';
+
+function update_order($db, $order_id, $status) {
+    $stmt = $db->prepare("UPDATE orders SET status = ? WHERE id = ?");
+    $stmt->bind_param("si", $status, $order_id);
+    return $stmt->execute();
+}
+
+function delete_order($db, $order_id) {
+    $stmt = $db->prepare("DELETE FROM orders WHERE id = ?");
+    $stmt->bind_param("i", $order_id);
+    return $stmt->execute();
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $data = json_decode(file_get_contents('php://input'), true);
+
+    if (isset($data['order_id']) && isset($data['status'])) {
+        $order_id = intval($data['order_id']);
+        $status = $data['status'];
+
+        if ($status === 'cancelled') {
+            delete_order($db, $order_id);
+        } else {
+            update_order($db, $order_id, $status);
+        }
+
+        http_response_code(200);
+        echo json_encode(['status' => 'success']);
+    } else {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Invalid data']);
+    }
+}

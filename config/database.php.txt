@@ -1,0 +1,15 @@
+<?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+$active_group = 'default';
+$db['default'] = array(
+    'dsn' => '',
+    'hostname' => 'localhost',
+    'username' => 'root',
+    'password' => '',
+    'database' => 'mini_erp',
+    'dbdriver' => 'mysqli',
+    'pconnect' => FALSE,
+    'db_debug' => TRUE,
+    'char_set' => 'utf8',
+    'dbcollat' => 'utf8_general_ci'
+);

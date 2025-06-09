@@ -1,0 +1,106 @@
+<?php
+session_start();
+require_once __DIR__ . '/../includes/product.php';
+$products = get_all_products($db);
+$product = isset($_GET['id']) ? get_product_by_id($db, intval($_GET['id'])) : null;
+$stocks = $product ? get_stocks_by_product($db, $product['id']) : [];
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Product Management</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container">
+    <h1>Product Management</h1>
+
+    <?php if (isset($_SESSION['success'])): ?>
+        <div class="alert alert-success"><?= $_SESSION['success']; unset($_SESSION['success']); ?></div>
+    <?php endif; ?>
+    <?php if (isset($_SESSION['error'])): ?>
+        <div class="alert alert-danger"><?= $_SESSION['error']; unset($_SESSION['error']); ?></div>
+    <?php endif; ?>
+
+    <form method="post" action="/mini-erp/includes/product.php">
+        <input type="hidden" name="action" value="<?= $product ? 'update' : 'create' ?>">
+        <?php if ($product): ?>
+            <input type="hidden" name="id" value="<?= $product['id'] ?>">
+        <?php endif; ?>
+        <div class="form-group">
+            <label>Name</label>
+            <input type="text" name="name" class="form-control" value="<?= $product ? $product['name'] : '' ?>" required>
+        </div>
+        <div class="form-group">
+            <label>Price</label>
+            <input type="number" name="price" class="form-control" value="<?= $product ? $product['price'] : '' ?>" step="0.01" required>
+        </div>
+        <div id="variations">
+            <?php if ($stocks): ?>
+                <?php foreach ($stocks as $index => $stock): ?>
+                    <div class="form-group">
+                        <label>Variation <?= $index + 1 ?></label>
+                        <input type="text" name="variations[]" class="form-control" value="<?= $stock['variation'] ?>">
+                        <input type="number" name="quantities[]" class="form-control" value="<?= $stock['quantity'] ?>">
+                    </div>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <div class="form-group">
+                    <label>Variation 1</label>
+                    <input type="text" name="variations[]" class="form-control">
+                    <input type="number" name="quantities[]" class="form-control">
+                </div>
+            <?php endif; ?>
+        </div>
+        <button type="button" class="btn btn-secondary" onclick="addVariation()">Add Variation</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+
+    <h2>Products</h2>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Price</th>
+                <th>Variations</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($products as $product): ?>
+                <tr>
+                    <td><?= htmlspecialchars($product['name']) ?></td>
+                    <td>R$ <?= number_format($product['price'], 2) ?></td>
+                    <td>
+                        <?php 
+                        $stocks = get_stocks_by_product($db, $product['id']);
+                        foreach ($stocks as $stock): ?>
+                            <div><?= htmlspecialchars($stock['variation']) ?>: <?= $stock['quantity'] ?> in stock</div>
+                        <?php endforeach; ?>
+                    </td>
+                    <td>
+                        <a href="/mini-erp/product.php?id=<?= $product['id'] ?>" class="btn btn-sm btn-primary">Edit</a>
+                        <a href="/mini-erp/includes/cart.php?action=add&product_id=<?= $product['id'] ?>" class="btn btn-sm btn-success">Buy</a>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+<script>
+function addVariation() {
+    const index = document.querySelectorAll('#variations .form-group').length + 1;
+    const html = `
+        <div class="form-group">
+            <label>Variation ${index}</label>
+            <input type="text" name="variations[]" class="form-control">
+            <input type="number" name="quantities[]" class="form-control">
+        </div>`;
+    document.getElementById('variations').insertAdjacentHTML('beforeend', html);
+}
+</script>
+</body>
+</html>

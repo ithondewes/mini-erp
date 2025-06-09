@@ -1,0 +1,105 @@
+<?php
+session_start();
+require_once __DIR__ . '/../config/database.php';
+
+function get_all_products($db) {
+    $result = $db->query("SELECT * FROM products");
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function get_product_by_id($db, $id) {
+    $stmt = $db->prepare("SELECT * FROM products WHERE id = ?");
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+    return $stmt->get_result()->fetch_assoc();
+}
+
+function get_stocks_by_product($db, $product_id) {
+    $stmt = $db->prepare("SELECT * FROM stocks WHERE product_id = ?");
+    $stmt->bind_param("i", $product_id);
+    $stmt->execute();
+    return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+}
+
+function create_product($db, $data) {
+    $stmt = $db->prepare("INSERT INTO products (name, price) VALUES (?, ?)");
+    $stmt->bind_param("sd", $data['name'], $data['price']);
+    $stmt->execute();
+    return $db->insert_id;
+}
+
+function update_product($db, $id, $data) {
+    $stmt = $db->prepare("UPDATE products SET name = ?, price = ? WHERE id = ?");
+    $stmt->bind_param("sdi", $data['name'], $data['price'], $id);
+    return $stmt->execute();
+}
+
+function create_stock($db, $data) {
+    $stmt = $db->prepare("INSERT INTO stocks (product_id, variation, quantity) VALUES (?, ?, ?)");
+    $stmt->bind_param("isi", $data['product_id'], $data['variation'], $data['quantity']);
+    return $stmt->execute();
+}
+
+function delete_stocks_by_product($db, $product_id) {
+    $stmt = $db->prepare("DELETE FROM stocks WHERE product_id = ?");
+    $stmt->bind_param("i", $product_id);
+    return $stmt->execute();
+}
+
+// Handle product creation
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create') {
+    if (empty($_POST['name']) || empty($_POST['price']) || !is_numeric($_POST['price'])) {
+        $_SESSION['error'] = "Name and valid price are required.";
+    } else {
+        $product_data = [
+            'name' => $_POST['name'],
+            'price' => floatval($_POST['price'])
+        ];
+        $product_id = create_product($db, $product_data);
+
+        if (isset($_POST['variations']) && is_array($_POST['variations'])) {
+            foreach ($_POST['variations'] as $key => $variation) {
+                if (!empty($variation) && !empty($_POST['quantities'][$key])) {
+                    create_stock($db, [
+                        'product_id' => $product_id,
+                        'variation' => $variation,
+                        'quantity' => intval($_POST['quantities'][$key])
+                    ]);
+                }
+            }
+        }
+        $_SESSION['success'] = "Product created successfully.";
+    }
+    header("Location: /mini-erp/product.php");
+    exit;
+}
+
+// Handle product update
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update' && isset($_POST['id'])) {
+    $id = intval($_POST['id']);
+    if (empty($_POST['name']) || empty($_POST['price']) || !is_numeric($_POST['price'])) {
+        $_SESSION['error'] = "Name and valid price are required.";
+    } else {
+        $product_data = [
+            'name' => $_POST['name'],
+            'price' => floatval($_POST['price'])
+        ];
+        update_product($db, $id, $product_data);
+        delete_stocks_by_product($db, $id);
+
+        if (isset($_POST['variations']) && is_array($_POST['variations'])) {
+            foreach ($_POST['variations'] as $key => $variation) {
+                if (!empty($variation) && !empty($_POST['quantities'][$key])) {
+                    create_stock($db, [
+                        'product_id' => $id,
+                        'variation' => $variation,
+                        'quantity' => intval($_POST['quantities'][$key])
+                    ]);
+                }
+            }
+        }
+        $_SESSION['success'] = "Product updated successfully.";
+    }
+    header("Location: /mini-erp/product.php");
+    exit;
+}

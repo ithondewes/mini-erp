@@ -1,0 +1,37 @@
+<?php
+session_start();
+require_once __DIR__ . '/../config/database.php';
+
+function get_all_coupons($db) {
+    $result = $db->query("SELECT * FROM coupons");
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function create_coupon($db, $data) {
+    $stmt = $db->prepare("INSERT INTO coupons (code, discount, min_value, expiry_date) VALUES (?, ?, ?, ?)");
+    $stmt->bind_param("sdds", $data['code'], $data['discount'], $data['min_value'], $data['expiry_date']);
+    return $stmt->execute();
+}
+
+// Handle coupon creation
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_coupon') {
+    if (empty($_POST['code']) || empty($_POST['discount']) || empty($_POST['min_value']) || empty($_POST['expiry_date'])) {
+        $_SESSION['error'] = "All fields are required.";
+    } elseif (!is_numeric($_POST['discount']) || !is_numeric($_POST['min_value'])) {
+        $_SESSION['error'] = "Discount and minimum value must be numeric.";
+    } else {
+        $coupon_data = [
+            'code' => $_POST['code'],
+            'discount' => floatval($_POST['discount']),
+            'min_value' => floatval($_POST['min_value']),
+            'expiry_date' => $_POST['expiry_date']
+        ];
+        if (create_coupon($db, $coupon_data)) {
+            $_SESSION['success'] = "Coupon created successfully.";
+        } else {
+            $_SESSION['error'] = "Coupon code already exists.";
+        }
+    }
+    header("Location: /mini-erp/coupon.php");
+    exit;
+}

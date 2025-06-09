@@ -1,0 +1,3 @@
+<?php
+header("Location: /mini-erp/product.php");
+exit;
